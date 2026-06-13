@@ -1,0 +1,8 @@
+pytest
+soccerdata
+rapidfuzz
+pandas
+beautifulsoup4
+lxml
+streamlit
+plotly
