@@ -280,9 +280,3 @@ Add a `fetch_*` function to `src/worldcup_ranker/ingest/soccerdata_adapter.py` f
 ```bash
 python -m pytest tests/ -v
 ```
-
-### Checking all imports work
-
-```bash
-python scripts/import_check.py
-```

@@ -41,6 +41,12 @@ Thumbs.db
 *.log
 .env
 
+# Type checking
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
 # Data caches
 data/
 data_raw/
