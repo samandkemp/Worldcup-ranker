@@ -484,7 +484,7 @@ if wc_btn and "squads" in st.session_state:
 # ── Guard ─────────────────────────────────────────────────────────────────────
 
 if "squads" not in st.session_state:
-    st.info("Use the sidebar to fetch data, then explore the tabs below.")
+    st.info("No squad data loaded. Fetch squad stats using the sidebar controls.")
     st.stop()
 
 # Apply the min-minutes filter for all rendering (doesn't touch session state)
@@ -496,7 +496,7 @@ teams: List[str]                     = sorted(squads.keys())
 has_wc_stats: bool                   = st.session_state.get('has_wc_stats', False)
 
 if not teams:
-    st.error("No squad data found. Check the Wikipedia URL or provider warnings.")
+    st.error("No squad data found — Wikipedia URL or provider configuration may be affecting results.")
     st.stop()
 
 # ── Player search results (shown inline when query is non-empty) ───────────────
@@ -649,7 +649,7 @@ with tab_players:
                 key="dl_player_csv",
             )
     else:
-        st.info("Select a player in both columns to compare.")
+        st.info("Player comparison requires a selection in both columns.")
 
 
 # ═══════════════════════════════════════════════════════
@@ -662,7 +662,7 @@ with tab_squad:
     total    = squad_sizes.get(sel_team, len(profiles))
 
     if not profiles:
-        st.warning(f"No player data for {sel_team} (0/{total} matched). Try adding more leagues.")
+        st.warning(f"No player data for {sel_team} (0/{total} matched) — coverage depends on leagues included in the selection.")
     else:
         st.caption(f"{len(profiles)} / {total} players matched from Wikipedia squad list")
 
@@ -761,8 +761,8 @@ with tab_groups:
                         st.rerun()
                     else:
                         st.error(
-                            "No group tables found. The Wikipedia page structure may have changed. "
-                            "Try the WC2026 groups sub-page instead."
+                            "No group tables found — Wikipedia page structure may have changed "
+                            "or this URL may lack group heading markup."
                         )
                 except Exception as exc:
                     st.error(f"Failed to load groups: {exc}")

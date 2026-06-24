@@ -138,11 +138,10 @@ def top_players_bar_figure(profiles: List[Dict[str, Any]], metric: str, n: int =
 
 
 def team_radar_figure(profiles: List[Dict[str, Any]], use_top_n: int = 11):
-    # Build a radar of core attacking/creative/defensive axes using per90 metrics
     rows = [per90_metrics(p) for p in profiles]
     if not rows or px is None:
         return None
-    # pick strongest players by minutes and take mean of axes
+    # top-N by minutes, averaged across radar axes
     rows_sorted = sorted(rows, key=lambda r: r.get('minutes', 0), reverse=True)[:use_top_n]
     axes = ['goals_per90','xG_per90','assists_per90','xA_per90','overall','rating']
     vals = []
@@ -156,7 +155,6 @@ def minutes_weighted_scatter(profiles: List[Dict[str, Any]]):
     rows = [per90_metrics(p) for p in profiles]
     if not rows or px is None:
         return None
-    # build simple lists and use plotly if available
     try:
         import pandas as _pd
         df = _pd.DataFrame(rows)
@@ -215,7 +213,7 @@ def metric_violin_figure(all_country_profiles: Dict[str, List[Dict[str, Any]]], 
 
 
 def _extract_position_from_profile(profile: Dict[str, Any]) -> str:
-    # look through raw records for common position keys
+    # raw records use varying field names for position across providers
     pos = None
     for item in profile.get('raw', []):
         rec = item.get('record') or {}
@@ -231,7 +229,7 @@ def _extract_position_from_profile(profile: Dict[str, Any]) -> str:
     if not pos:
         return 'Unknown'
     p = str(pos).lower()
-    # map to broad groups
+    # normalises to GK / DEF / MID / FWD buckets
     if 'goal' in p or p.startswith('gk'):
         return 'GK'
     if 'def' in p or 'back' in p or p.startswith('cb') or p.startswith('lb') or p.startswith('rb'):
