@@ -1,5 +1,5 @@
 import math
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 # Lazy imports: prefer pandas/plotly when available but keep pure-Python fallbacks
 try:
@@ -335,3 +335,167 @@ def position_radar_figure(profiles: List[Dict[str, Any]]):
     df_m = df.melt(id_vars=['position'], value_vars=axes, var_name='axis', value_name='value')
     fig = px.line_polar(df_m, r='value', theta='axis', color='position', line_close=True, title='Position profiles')
     return fig
+
+
+# ── Matchup scoring ───────────────────────────────────────────────────────────
+
+_MATCHUP_AXES = ["goals_per90", "xG_per90", "assists_per90", "xA_per90", "overall", "rating"]
+
+DEFAULT_MATCHUP_WEIGHTS: Dict[str, float] = {
+    "goals_per90":   2.0,
+    "xG_per90":      2.0,
+    "assists_per90": 1.5,
+    "xA_per90":      1.5,
+    "overall":       1.0,
+    "rating":        1.0,
+}
+
+
+def _norm_a(val: float, mn: float, mx: float) -> float:
+    """Clamp-normalise val to [0, 1] within [mn, mx]."""
+    return max(0.0, min(1.0, (val - mn) / (mx - mn)))
+
+
+def defensive_profile(
+    profiles: List[Dict[str, Any]],
+    axes: Optional[List[str]] = None,
+) -> Dict[str, float]:
+    """Average per90 values for a team's DEF and GK players on each axis.
+    Falls back to the full squad when no DEF/GK players are present in the data.
+    """
+    if axes is None:
+        axes = _MATCHUP_AXES
+    defenders = [p for p in profiles if _extract_position_from_profile(p) in ('GK', 'DEF')]
+    pool = defenders if defenders else profiles
+    result: Dict[str, float] = {}
+    for a in axes:
+        vals = []
+        for p in pool:
+            v = per90_metrics(p).get(a)
+            if v is not None and isinstance(v, (int, float)) and not math.isnan(float(v)):
+                vals.append(float(v))
+        result[a] = float(sum(vals) / len(vals)) if vals else 0.0
+    return result
+
+
+def tournament_defensive_ranges(
+    squads: Dict[str, List[Dict[str, Any]]],
+    axes: Optional[List[str]] = None,
+) -> Dict[str, Tuple[float, float]]:
+    """Min/max of DEF+GK per90 values across all teams for each axis.
+    Used to normalise a team's defensive profile against the tournament field.
+    """
+    if axes is None:
+        axes = _MATCHUP_AXES
+    pooled: Dict[str, List[float]] = {a: [] for a in axes}
+    for profiles in squads.values():
+        defenders = [p for p in profiles if _extract_position_from_profile(p) in ('GK', 'DEF')]
+        pool = defenders if defenders else profiles
+        for p in pool:
+            row = per90_metrics(p)
+            for a in axes:
+                v = row.get(a)
+                if v is not None and isinstance(v, (int, float)) and not math.isnan(float(v)):
+                    pooled[a].append(float(v))
+    ranges: Dict[str, Tuple[float, float]] = {}
+    for a in axes:
+        vals = pooled[a]
+        if len(vals) >= 2:
+            mn, mx = min(vals), max(vals)
+            ranges[a] = (mn, mx if mx > mn else mn + 1e-6)
+        else:
+            ranges[a] = (0.0, 1.0)
+    return ranges
+
+
+def defensive_vulnerability(
+    def_profile: Dict[str, float],
+    def_ranges: Dict[str, Tuple[float, float]],
+) -> Dict[str, float]:
+    """Per-axis vulnerability of a defensive profile relative to tournament DEF ranges.
+    Score of 1.0 means weakest defence in the tournament on that axis; 0.0 means strongest.
+    Missing or NaN values default to 0.5 (neutral — neither punished nor rewarded).
+    """
+    result: Dict[str, float] = {}
+    for a, (mn, mx) in def_ranges.items():
+        v = def_profile.get(a)
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            result[a] = 0.5
+        else:
+            result[a] = 1.0 - _norm_a(float(v), mn, mx)
+    return result
+
+
+def matchup_scores(
+    team_a_profiles: List[Dict[str, Any]],
+    team_b_profiles: List[Dict[str, Any]],
+    all_squads: Dict[str, List[Dict[str, Any]]],
+    weights: Optional[Dict[str, float]] = None,
+    axes: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Rank Team A's outfield players by their likely impact against Team B's defence.
+
+    Score = Σ weight[a] × norm_player_value[a] × vulnerability[a]
+
+    Where norm_player_value is normalised against all tournament players on that axis,
+    and vulnerability is Team B's defensive weakness on that axis relative to all teams.
+
+    GK players from Team A are excluded. Returns results sorted by matchup_score descending.
+    """
+    if axes is None:
+        axes = _MATCHUP_AXES
+    if weights is None:
+        weights = DEFAULT_MATCHUP_WEIGHTS
+
+    # Set team B defensive context
+    def_prof = defensive_profile(team_b_profiles, axes)
+    def_ranges = tournament_defensive_ranges(all_squads, axes)
+    vuln = defensive_vulnerability(def_prof, def_ranges)
+
+    # Tournament-wide player ranges for normalising attacking output
+    all_flat = [p for profiles in all_squads.values() for p in profiles]
+    player_ranges: Dict[str, Tuple[float, float]] = {}
+    for a in axes:
+        vals = []
+        for p in all_flat:
+            v = per90_metrics(p).get(a)
+            if v is not None and isinstance(v, (int, float)) and not math.isnan(float(v)):
+                vals.append(float(v))
+        if len(vals) >= 2:
+            mn, mx = min(vals), max(vals)
+            player_ranges[a] = (mn, mx if mx > mn else mn + 1e-6)
+        else:
+            player_ranges[a] = (0.0, 1.0)
+
+    results = []
+    for profile in team_a_profiles:
+        if _extract_position_from_profile(profile) == 'GK':
+            continue
+        row = per90_metrics(profile)
+        axis_contributions: Dict[str, float] = {}
+        total = 0.0
+        for a in axes:
+            v = row.get(a)
+            safe_v = float(v) if (v is not None and isinstance(v, (int, float)) and not math.isnan(float(v))) else 0.0
+            norm_v = _norm_a(safe_v, *player_ranges[a])
+            contribution = weights.get(a, 1.0) * norm_v * vuln.get(a, 0.5)
+            axis_contributions[a] = round(contribution, 4)
+            total += contribution
+
+        results.append({
+            'name':              profile.get('name'),
+            'position':          _extract_position_from_profile(profile),
+            'matchup_score':     round(total, 4),
+            'axis_contributions': axis_contributions,
+            'goals_per90':       row.get('goals_per90'),
+            'xG_per90':          row.get('xG_per90'),
+            'assists_per90':     row.get('assists_per90'),
+            'xA_per90':          row.get('xA_per90'),
+            'overall':           row.get('overall'),
+            'rating':            row.get('rating'),
+            'minutes':           row.get('minutes'),
+            'matches':           row.get('matches'),
+        })
+
+    results.sort(key=lambda r: r['matchup_score'], reverse=True)
+    return results

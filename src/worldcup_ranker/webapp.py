@@ -254,6 +254,35 @@ def _wc_radar(
     return fig
 
 
+# ── Matchup helpers ───────────────────────────────────────────────────────────
+
+def _vulnerability_bar(vuln: Dict[str, float], team_name: str) -> Optional[Any]:
+    """Horizontal bar chart of Team B's defensive vulnerability per axis."""
+    try:
+        import plotly.graph_objects as go
+    except ImportError:
+        return None
+    labels = [_AXIS_LABEL.get(a, a) for a in _RADAR_AXES]
+    values = [vuln.get(a, 0.0) for a in _RADAR_AXES]
+    colours = [
+        "#e15759" if v > 0.6 else "#f28e2b" if v > 0.4 else "#59a14f"
+        for v in values
+    ]
+    fig = go.Figure(go.Bar(
+        x=values, y=labels, orientation='h',
+        marker_color=colours,
+        text=[f"{v:.0%}" for v in values],
+        textposition='outside',
+    ))
+    fig.update_layout(
+        title=f"{team_name} — defensive vulnerability by axis",
+        xaxis=dict(range=[0, 1.15], tickformat=".0%"),
+        height=280,
+        margin=dict(l=10, r=40, t=50, b=20),
+    )
+    return fig
+
+
 # ── Data tables ───────────────────────────────────────────────────────────────
 
 def _player_stats_df(prof_a: Dict, prof_b: Dict, la: str, lb: str):
@@ -535,12 +564,13 @@ if search_query:
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab_teams, tab_players, tab_squad, tab_rank, tab_groups = st.tabs([
+tab_teams, tab_players, tab_squad, tab_rank, tab_groups, tab_matchup = st.tabs([
     "Team Comparison",
     "Player Comparison",
     "Squad Explorer",
     "Rankings",
     "Group Stage",
+    "Matchup",
 ])
 
 
@@ -813,3 +843,128 @@ with tab_groups:
                 except ImportError:
                     for r in rows:
                         st.write(r)
+
+
+# ═══════════════════════════════════════════════════════
+# Tab 6 — Matchup
+# ═══════════════════════════════════════════════════════
+
+with tab_matchup:
+    st.markdown(
+        "Ranks Team A's outfield players by their likely impact against Team B's defensive style. "
+        "Score combines each player's attacking output with Team B's defensive vulnerability on the same axes, "
+        "normalised across the full tournament."
+    )
+
+    mu_c1, mu_c2 = st.columns(2)
+    with mu_c1:
+        mu_team_a = st.selectbox("Team A (attackers)", teams, key="mu_a")
+    with mu_c2:
+        mu_team_b = st.selectbox("Team B (defensive reference)", teams,
+                                  index=min(1, len(teams) - 1), key="mu_b")
+
+    if mu_team_a == mu_team_b:
+        st.warning("Choose two different teams.")
+    else:
+        mu_pa = squads.get(mu_team_a, [])
+        mu_pb = squads.get(mu_team_b, [])
+
+        # ── Team B defensive vulnerability ───────────────────────────────────
+        mu_def_prof   = analytics.defensive_profile(mu_pb)
+        mu_def_ranges = analytics.tournament_defensive_ranges(squads)
+        mu_vuln       = analytics.defensive_vulnerability(mu_def_prof, mu_def_ranges)
+
+        mu_defenders = [p for p in mu_pb if analytics._extract_position_from_profile(p) in ('GK', 'DEF')]
+        if not mu_defenders:
+            st.info(f"No DEF/GK found for {mu_team_b} — using full squad as defensive reference.")
+            mu_defenders = mu_pb
+
+        mu_def_overall = [
+            _safe((p.get('aggregated') or {}).get('overall'))
+            for p in mu_defenders
+            if _safe((p.get('aggregated') or {}).get('overall')) > 0
+        ]
+        mean_def_overall = sum(mu_def_overall) / len(mu_def_overall) if mu_def_overall else 0.0
+
+        st.markdown(f"#### {mu_team_b} defensive profile")
+        vm1, vm2, vm3 = st.columns([3, 1, 1])
+        with vm1:
+            vfig = _vulnerability_bar(mu_vuln, mu_team_b)
+            if vfig:
+                st.plotly_chart(vfig, use_container_width=True)
+        with vm2:
+            st.metric("DEF/GK players", len(mu_defenders))
+        with vm3:
+            st.metric("Mean Overall", f"{mean_def_overall:.1f}" if mean_def_overall else "—")
+
+        # ── Ranked player table ───────────────────────────────────────────────
+        st.markdown(f"#### {mu_team_a} player impact ranking")
+
+        mu_results = analytics.matchup_scores(mu_pa, mu_pb, squads)
+
+        if not mu_results:
+            st.warning(f"No outfield players available for {mu_team_a} at the current minutes threshold.")
+        else:
+            try:
+                import pandas as _pd
+
+                def _fmt(v):
+                    if v is None or (isinstance(v, float) and math.isnan(v)):
+                        return "—"
+                    return round(float(v), 3)
+
+                table_rows = []
+                for i, r in enumerate(mu_results, 1):
+                    table_rows.append({
+                        "Rank":          i,
+                        "Name":          r['name'],
+                        "Position":      r['position'],
+                        "Matchup Score": round(r['matchup_score'], 3),
+                        "Goals / 90":    _fmt(r['goals_per90']),
+                        "xG / 90":       _fmt(r['xG_per90']),
+                        "Assists / 90":  _fmt(r['assists_per90']),
+                        "xA / 90":       _fmt(r['xA_per90']),
+                        "Overall":       _fmt(r['overall']),
+                        "Rating":        _fmt(r['rating']),
+                        "Minutes":       int(r['minutes'] or 0),
+                    })
+
+                df_mu = _pd.DataFrame(table_rows).set_index("Rank")
+                st.dataframe(df_mu, use_container_width=True, height=500)
+                st.download_button(
+                    "Download matchup scores as CSV",
+                    df_mu.to_csv(),
+                    f"{mu_team_a}_vs_{mu_team_b}_matchup.csv",
+                    "text/csv",
+                    key="dl_matchup_csv",
+                )
+            except ImportError:
+                for r in mu_results:
+                    st.write(r)
+
+            # ── Optional radar overlay ────────────────────────────────────────
+            if st.checkbox("Show top attacker vs Team B defence radar", key="mu_show_radar"):
+                top = mu_results[0]
+                top_profile = next(
+                    (p for p in mu_pa if p.get('name') == top['name']), None
+                )
+                if top_profile:
+                    # Normalise top player against all tournament players
+                    p_ranges = _axis_ranges(all_flat, _RADAR_AXES)
+                    top_row   = analytics.per90_metrics(top_profile)
+                    top_vals  = [_norm(_safe(top_row.get(a)), *p_ranges[a]) for a in _RADAR_AXES]
+
+                    # Normalise Team B defensive profile against tournament DEF ranges
+                    def_vals = [_norm(mu_def_prof.get(a, 0.0), *mu_def_ranges[a]) for a in _RADAR_AXES]
+
+                    rfig = _build_radar(
+                        [(top['name'], top_vals), (f"{mu_team_b} Defence", def_vals)],
+                        _RADAR_AXES,
+                        f"{top['name']} vs {mu_team_b} Defence — normalised",
+                    )
+                    if rfig:
+                        st.plotly_chart(rfig, use_container_width=True)
+                    st.caption(
+                        f"Player values normalised against all tournament players. "
+                        f"{mu_team_b} defence values normalised against tournament DEF/GK field."
+                    )
