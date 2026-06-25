@@ -299,7 +299,7 @@ def _player_stats_df(prof_a: Dict, prof_b: Dict, la: str, lb: str):
     def fmt(v):
         if v is None or (isinstance(v, float) and math.isnan(v)):
             return "—"
-        return round(float(v), 3) if isinstance(v, float) else v
+        return f"{float(v):.3f}" if isinstance(v, (int, float)) else str(v)
 
     rows = []
     for key, label in [
@@ -408,12 +408,12 @@ with st.sidebar:
         default=_params.get('leagues', _TOP_LEAGUES),
     )
     force_refresh = st.checkbox("Force refresh (ignore cache)")
-    fetch_btn = st.button("Fetch / Refresh Data", type="primary", use_container_width=True)
+    fetch_btn = st.button("Fetch / Refresh Data", type="primary", width='stretch')
 
     # WC match stats row
     wc_btn = st.button(
         "Fetch WC Match Data",
-        use_container_width=True,
+        width='stretch',
         help="Pull in-tournament stats from FBref and attach to player profiles",
         disabled="squads" not in st.session_state,
     )
@@ -486,8 +486,8 @@ if wc_btn and "squads" in st.session_state:
         try:
             enriched, wc_warnings = enrich_with_tournament_stats(
                 st.session_state.squads,
-                tournament="FIFA World Cup",
-                season="2026",
+                tournament="INT-World Cup",
+                season="2526",
             )
             st.session_state.squads = enriched
             st.session_state.has_wc_stats = True
@@ -593,7 +593,7 @@ with tab_teams:
 
         fig = _teams_radar(pa, pb, team_a, team_b, all_flat)
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch', key="tc_radar")
         else:
             st.info("Install plotly for the radar chart.")
 
@@ -614,12 +614,12 @@ with tab_teams:
 
         st.markdown("#### Position profiles")
         pc1, pc2 = st.columns(2)
-        for col, label, profiles in [(pc1, team_a, pa), (pc2, team_b, pb)]:
+        for col, label, profiles, side in [(pc1, team_a, pa, "a"), (pc2, team_b, pb, "b")]:
             with col:
                 st.markdown(f"**{label}**")
                 pfig = analytics.position_radar_figure(profiles)
                 if pfig:
-                    st.plotly_chart(pfig, use_container_width=True)
+                    st.plotly_chart(pfig, width='stretch', key=f"tc_pos_{side}")
 
 
 # ═══════════════════════════════════════════════════════
@@ -664,12 +664,12 @@ with tab_players:
             rfig = _players_radar(prof_a, prof_b, pn_a, pn_b, all_flat, pos_aware=pos_aware)
 
         if rfig:
-            st.plotly_chart(rfig, use_container_width=True)
+            st.plotly_chart(rfig, width='stretch', key="pc_radar")
 
         st.markdown("#### Stats")
         df_p = _player_stats_df(prof_a, prof_b, pn_a, pn_b)
         if df_p is not None:
-            st.dataframe(df_p, use_container_width=True)
+            st.dataframe(df_p, width='stretch')
             csv = df_p.to_csv()
             st.download_button(
                 "Download stats as CSV",
@@ -708,22 +708,22 @@ with tab_squad:
         with opt_c2:
             bar_fig = analytics.top_players_bar_figure(profiles, metric, top_n)
             if bar_fig:
-                st.plotly_chart(bar_fig, use_container_width=True)
+                st.plotly_chart(bar_fig, width='stretch', key="se_bar")
 
         sc1, sc2 = st.columns(2)
         with sc1:
             scatter = analytics.minutes_weighted_scatter(profiles)
             if scatter:
-                st.plotly_chart(scatter, use_container_width=True)
+                st.plotly_chart(scatter, width='stretch', key="se_scatter")
         with sc2:
             pie = analytics.club_contribution_pie(profiles)
             if pie:
-                st.plotly_chart(pie, use_container_width=True)
+                st.plotly_chart(pie, width='stretch', key="se_pie")
 
         pos_fig = analytics.position_radar_figure(profiles)
         if pos_fig:
             st.markdown("#### Position profiles")
-            st.plotly_chart(pos_fig, use_container_width=True)
+            st.plotly_chart(pos_fig, width='stretch', key="se_pos_radar")
 
         # CSV export of squad stats
         try:
@@ -748,7 +748,7 @@ with tab_squad:
 with tab_rank:
     df_r = _rankings_df(squads, squad_sizes)
     if df_r is not None:
-        st.dataframe(df_r, use_container_width=True, height=620)
+        st.dataframe(df_r, width='stretch', height=620)
         st.download_button(
             "Download rankings as CSV",
             df_r.to_csv(),
@@ -768,7 +768,7 @@ with tab_rank:
     )
     vfig = analytics.metric_violin_figure(squads, v_metric)
     if vfig:
-        st.plotly_chart(vfig, use_container_width=True)
+        st.plotly_chart(vfig, width='stretch', key="rank_violin")
 
 
 # ═══════════════════════════════════════════════════════
@@ -839,7 +839,7 @@ with tab_groups:
                     import pandas as _pd
                     df_g = _pd.DataFrame(rows).sort_values("Strength", ascending=False)
                     df_g.index = range(1, len(df_g) + 1)
-                    st.dataframe(df_g, use_container_width=True)
+                    st.dataframe(df_g, width='stretch')
                 except ImportError:
                     for r in rows:
                         st.write(r)
@@ -891,7 +891,7 @@ with tab_matchup:
         with vm1:
             vfig = _vulnerability_bar(mu_vuln, mu_team_b)
             if vfig:
-                st.plotly_chart(vfig, use_container_width=True)
+                st.plotly_chart(vfig, width='stretch', key="mu_vuln_bar")
         with vm2:
             st.metric("DEF/GK players", len(mu_defenders))
         with vm3:
@@ -911,7 +911,7 @@ with tab_matchup:
                 def _fmt(v):
                     if v is None or (isinstance(v, float) and math.isnan(v)):
                         return "—"
-                    return round(float(v), 3)
+                    return f"{float(v):.3f}"
 
                 table_rows = []
                 for i, r in enumerate(mu_results, 1):
@@ -930,7 +930,7 @@ with tab_matchup:
                     })
 
                 df_mu = _pd.DataFrame(table_rows).set_index("Rank")
-                st.dataframe(df_mu, use_container_width=True, height=500)
+                st.dataframe(df_mu, width='stretch', height=500)
                 st.download_button(
                     "Download matchup scores as CSV",
                     df_mu.to_csv(),
@@ -963,7 +963,7 @@ with tab_matchup:
                         f"{top['name']} vs {mu_team_b} Defence — normalised",
                     )
                     if rfig:
-                        st.plotly_chart(rfig, use_container_width=True)
+                        st.plotly_chart(rfig, width='stretch', key="mu_top_radar")
                     st.caption(
                         f"Player values normalised against all tournament players. "
                         f"{mu_team_b} defence values normalised against tournament DEF/GK field."

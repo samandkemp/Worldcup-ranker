@@ -33,8 +33,17 @@ def fetch_squads_from_wikipedia(url: str) -> Dict[str, List[str]]:
         if not team_name or team_name.lower() in _SKIP_HEADINGS:
             continue
 
-        node = heading.find_next_sibling()
-        while node and node.name not in ('h2', 'h3'):
+        # Modern Wikipedia wraps headings in <div class="mw-heading">; the
+        # table is a sibling of that div, not of the <h2>/<h3> itself.
+        parent = heading.parent
+        start = parent if (parent.name == 'div' and 'mw-heading' in ' '.join(parent.get('class') or [])) else heading
+
+        node = start.find_next_sibling()
+        while node:
+            if node.name in ('h2', 'h3'):
+                break
+            if node.name == 'div' and 'mw-heading' in ' '.join(node.get('class') or []):
+                break
             if node.name == 'table':
                 names = _extract_player_names(node)
                 if len(names) >= 5:
@@ -94,8 +103,15 @@ def fetch_groups_from_wikipedia(url: str) -> Dict[str, List[str]]:
         if not label.lower().startswith('group'):
             continue
 
-        node = heading.find_next_sibling()
-        while node and node.name not in ('h2', 'h3'):
+        parent = heading.parent
+        start = parent if (parent.name == 'div' and 'mw-heading' in ' '.join(parent.get('class') or [])) else heading
+
+        node = start.find_next_sibling()
+        while node:
+            if node.name in ('h2', 'h3'):
+                break
+            if node.name == 'div' and 'mw-heading' in ' '.join(node.get('class') or []):
+                break
             if node.name == 'table':
                 teams = _extract_group_teams(node)
                 if len(teams) >= 2:

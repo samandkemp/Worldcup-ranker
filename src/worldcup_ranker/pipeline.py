@@ -101,8 +101,8 @@ def fetch_for_leagues(
 
 def enrich_with_tournament_stats(
     squads: Dict[str, List[Dict[str, Any]]],
-    tournament: str = "FIFA World Cup",
-    season: str = "2026",
+    tournament: str = "INT-World Cup",
+    season: str = "2526",
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
     """Fetch WC match stats from FBref and attach them to matching player profiles.
 

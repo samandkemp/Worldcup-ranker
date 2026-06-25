@@ -26,8 +26,17 @@ def _safe_float(v):
 
 def per90_metrics(profile: Dict[str, Any]) -> Dict[str, float]:
     agg = _agg_from_profile(profile)
-    minutes = int(agg.get('minutes') or 0)
+    wc = profile.get('wc_stats') or {}
+
+    # Prefer WC tournament stats for match-based metrics when available;
+    # fall back to club-season aggregated stats.
+    def _pick(wc_key, agg_key):
+        v = wc.get(wc_key) if wc else None
+        return v if v is not None else agg.get(agg_key)
+
+    minutes = int(_pick('minutes', 'minutes') or 0)
     minutes = max(minutes, 0)
+
     def p90(val):
         try:
             valf = float(val)
@@ -35,20 +44,26 @@ def per90_metrics(profile: Dict[str, Any]) -> Dict[str, float]:
             return math.nan
         return (valf / minutes * 90.0) if minutes > 0 else math.nan
 
+    goals   = _pick('goals',   'goals')
+    assists = _pick('assists', 'assists')
+    xG      = _pick('xG',     'xG')
+    xA      = _pick('xA',     'xA')
+
     return {
-        'name': profile.get('name'),
-        'minutes': minutes,
-        'matches': int(agg.get('matches') or 0),
-        'goals': _safe_float(agg.get('goals')),
-        'assists': _safe_float(agg.get('assists')),
-        'xG': _safe_float(agg.get('xG')),
-        'xA': _safe_float(agg.get('xA')),
-        'overall': _safe_float(agg.get('overall')),
-        'rating': _safe_float(agg.get('rating')),
-        'goals_per90': p90(agg.get('goals') or 0),
-        'assists_per90': p90(agg.get('assists') or 0),
-        'xG_per90': p90(agg.get('xG') or 0.0),
-        'xA_per90': p90(agg.get('xA') or 0.0),
+        'name':          profile.get('name'),
+        'minutes':       minutes,
+        'matches':       int(_pick('matches', 'matches') or 0),
+        'goals':         _safe_float(goals),
+        'assists':       _safe_float(assists),
+        'xG':            _safe_float(xG),
+        'xA':            _safe_float(xA),
+        'overall':       _safe_float(agg.get('overall')),
+        'rating':        _safe_float(agg.get('rating')),
+        'goals_per90':   p90(goals   or 0),
+        'assists_per90': p90(assists or 0),
+        'xG_per90':      p90(xG      or 0.0),
+        'xA_per90':      p90(xA      or 0.0),
+        'has_wc_stats':  bool(wc),
     }
 
 

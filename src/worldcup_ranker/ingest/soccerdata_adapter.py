@@ -1,241 +1,139 @@
-"""Adapter that uses the `soccerdata` PyPI package to fetch data from multiple sources."""
+"""Adapter for the `soccerdata` 1.9.x PyPI package."""
 from typing import List, Dict, Any
 
 from worldcup_ranker.models import Player
 from worldcup_ranker.normaliser import normalise_league
 
 
-def _import_provider(names: List[str]):
-    for name in names:
-        try:
-            components = name.split('.')
-            mod = __import__('.'.join(components[:-1]) or components[0], fromlist=[components[-1]])
-            return getattr(mod, components[-1]) if hasattr(mod, components[-1]) else mod
-        except Exception:
-            continue
+def _ensure_soccerdata():
+    try:
+        import soccerdata
+        return soccerdata
+    except ImportError as e:
+        raise ImportError(
+            "The `soccerdata` package is required. Install with `pip install soccerdata`."
+        ) from e
+
+
+def _flatten(df):
+    """Reset index and flatten MultiIndex columns to 'Group_Stat' strings."""
+    df = df.reset_index()
+    if df.columns.nlevels > 1:
+        df.columns = [
+            '_'.join(str(p) for p in col).strip('_') if isinstance(col, tuple) else col
+            for col in df.columns
+        ]
+    return df
+
+
+def _col(row: dict, *candidates):
+    """Return the first non-None value found among candidate keys."""
+    for k in candidates:
+        v = row.get(k)
+        if v is not None:
+            return v
     return None
 
 
-def _ensure_package():
-    try:
-        import soccerdata  # type: ignore
-        return soccerdata
-    except Exception as e:
-        raise ImportError("The `soccerdata` package is required for this adapter. Install it with `pip install soccerdata`.") from e
-
-
 def fetch_fbref_player_stats(season: str, competition: str) -> List[Dict[str, Any]]:
-    _ensure_package()
-    Provider = _import_provider(["soccerdata.fbref.FBref", "soccerdata.providers.FBref", "soccerdata.fbref"])
-    if Provider is None:
-        raise RuntimeError("FBref provider not found in soccerdata. Verify your soccerdata version and provider names.")
-
+    sd = _ensure_soccerdata()
     try:
-        if callable(Provider):
-            p = Provider(season=season)
-        else:
-            p = Provider
-        rows = None
-        if hasattr(p, 'player_stats'):
-            rows = p.player_stats(competition)
-        elif hasattr(p, 'get_player_stats'):
-            rows = p.get_player_stats(competition)
-        else:
-            rows = getattr(p, 'data', None)
-
-        if rows is None:
-            raise RuntimeError("Unable to fetch FBref data from provider; no known method returned data.")
-
-        try:
-            import pandas as pd
-
-            if isinstance(rows, pd.DataFrame):
-                records = rows.to_dict(orient='records')
-            else:
-                records = list(rows)
-        except Exception:
-            records = list(rows)
-
-        out: List[Dict[str, Any]] = []
-        for r in records:
-            name = r.get('player') or r.get('name')
-            club = r.get('squad') or r.get('club') or r.get('team')
-            league = r.get('competition') or ''
-            out.append({
-                'name': name,
-                'club': club,
-                'league': normalise_league(league),
-                'minutes': r.get('minutes') or r.get('min') or 0,
-                'matches': r.get('appearances') or r.get('apps') or 0,
-                'goals': r.get('goals') or 0,
-                'assists': r.get('assists') or 0,
-                'raw': r,
-            })
-        return out
+        fb = sd.FBref(leagues=competition, seasons=season)
+        df = fb.read_player_season_stats(stat_type="standard")
+        df = _flatten(df)
     except Exception as e:
         raise RuntimeError(f"Error fetching FBref data: {e}") from e
 
+    out: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        r = dict(row)
+        out.append({
+            'name':    _col(r, 'player_', 'player'),
+            'club':    _col(r, 'team_', 'team', 'squad'),
+            'league':  normalise_league(str(_col(r, 'league_', 'league') or '')),
+            'position': _col(r, 'pos_', 'pos', 'position'),
+            'minutes': _col(r, 'Playing Time_Min', 'Min', 'minutes', 'min') or 0,
+            'matches': _col(r, 'Playing Time_MP', 'MP', 'matches', 'apps') or 0,
+            'goals':   _col(r, 'Performance_Gls', 'Gls', 'goals') or 0,
+            'assists': _col(r, 'Performance_Ast', 'Ast', 'assists') or 0,
+            'raw': r,
+        })
+    return out
+
 
 def fetch_understat_xg(season: str, competition: str) -> List[Dict[str, Any]]:
-    _ensure_package()
-    Provider = _import_provider(["soccerdata.understat.Understat", "soccerdata.understat"])
-    if Provider is None:
-        raise RuntimeError("Understat provider not found in soccerdata.")
-
+    sd = _ensure_soccerdata()
     try:
-        p = Provider(season=season) if callable(Provider) else Provider
-        rows = None
-        if hasattr(p, 'player_stats'):
-            rows = p.player_stats(competition)
-        elif hasattr(p, 'xg_stats'):
-            rows = p.xg_stats(competition)
-        else:
-            rows = getattr(p, 'data', None)
-
-        try:
-            import pandas as pd
-            if isinstance(rows, pd.DataFrame):
-                records = rows.to_dict(orient='records')
-            else:
-                records = list(rows)
-        except Exception:
-            records = list(rows)
-
-        out = []
-        for r in records:
-            out.append({
-                'name': r.get('player') or r.get('name'),
-                'xG': r.get('xG') or r.get('xg') or 0.0,
-                'xA': r.get('xA') or r.get('xa') or 0.0,
-                'minutes': r.get('minutes') or 0,
-                'raw': r,
-            })
-        return out
+        us = sd.Understat(leagues=competition, seasons=season)
+        df = us.read_player_season_stats()
+        df = _flatten(df)
     except Exception as e:
         raise RuntimeError(f"Error fetching Understat data: {e}") from e
 
+    out: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        r = dict(row)
+        out.append({
+            'name':    _col(r, 'player_', 'player', 'name'),
+            'xG':      _col(r, 'xG', 'xg') or 0.0,
+            'xA':      _col(r, 'xA', 'xa') or 0.0,
+            'minutes': _col(r, 'minutes', 'min', 'Playing Time_Min') or 0,
+            'raw': r,
+        })
+    return out
+
 
 def fetch_sofifa_attributes(version: str = 'latest') -> List[Dict[str, Any]]:
-    _ensure_package()
-    Provider = _import_provider(["soccerdata.sofifa.SoFIFA", "soccerdata.sofifa"])
-    if Provider is None:
-        raise RuntimeError("SoFIFA provider not found in soccerdata.")
-
+    sd = _ensure_soccerdata()
     try:
-        p = Provider(version=version) if callable(Provider) else Provider
-        rows = None
-        if hasattr(p, 'player_attributes'):
-            rows = p.player_attributes()
-        else:
-            rows = getattr(p, 'data', None)
-
-        try:
-            import pandas as pd
-            if isinstance(rows, pd.DataFrame):
-                records = rows.to_dict(orient='records')
-            else:
-                records = list(rows)
-        except Exception:
-            records = list(rows)
-
-        out = []
-        for r in records:
-            out.append({
-                'name': r.get('short_name') or r.get('name'),
-                'overall': r.get('overall') or r.get('ovr'),
-                'potential': r.get('potential'),
-                'attributes': r,
-            })
-        return out
+        sf = sd.SoFIFA()
+        df = sf.read_player_ratings()
+        df = _flatten(df)
     except Exception as e:
         raise RuntimeError(f"Error fetching SoFIFA data: {e}") from e
 
+    out: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        r = dict(row)
+        out.append({
+            'name':      _col(r, 'player_', 'player', 'short_name', 'name'),
+            'overall':   _col(r, 'overall', 'ovr'),
+            'potential': _col(r, 'potential'),
+            'attributes': r,
+        })
+    return out
+
 
 def fetch_sofascore_season_updates(competition: str, season: str) -> List[Dict[str, Any]]:
-    _ensure_package()
-    Provider = _import_provider(["soccerdata.sofascore.SofaScore", "soccerdata.sofascore"])
-    if Provider is None:
-        raise RuntimeError("Sofascore provider not found in soccerdata.")
+    # soccerdata 1.9.x Sofascore does not expose player stats — return empty.
+    raise RuntimeError("Sofascore player stats are not available in soccerdata 1.9.x.")
 
+
+def fetch_tournament_stats(tournament: str = "INT-World Cup", season: str = "2526") -> List[Dict[str, Any]]:
+    """Fetch WC tournament player stats via FBref."""
+    sd = _ensure_soccerdata()
     try:
-        p = Provider(season=season) if callable(Provider) else Provider
-        rows = None
-        if hasattr(p, 'player_stats'):
-            rows = p.player_stats(competition)
-        else:
-            rows = getattr(p, 'data', None)
-
-        try:
-            import pandas as pd
-            if isinstance(rows, pd.DataFrame):
-                records = rows.to_dict(orient='records')
-            else:
-                records = list(rows)
-        except Exception:
-            records = list(rows)
-
-        out = []
-        for r in records:
-            out.append({
-                'name': r.get('player') or r.get('name'),
-                'rating': r.get('rating') or r.get('sofascore') or None,
-                'minutes': r.get('minutes') or 0,
-                'raw': r,
-            })
-        return out
-    except Exception as e:
-        raise RuntimeError(f"Error fetching Sofascore data: {e}") from e
-
-
-def fetch_tournament_stats(tournament: str = "FIFA World Cup", season: str = "2026") -> List[Dict[str, Any]]:
-    """Fetch player stats for the WC tournament itself via FBref.
-
-    Uses the same FBref adapter but pointed at the WC competition rather than a
-    domestic league.  Falls back gracefully if the competition is not yet available.
-    """
-    _ensure_package()
-    Provider = _import_provider(["soccerdata.fbref.FBref", "soccerdata.providers.FBref", "soccerdata.fbref"])
-    if Provider is None:
-        raise RuntimeError("FBref provider not found in soccerdata.")
-
-    try:
-        p = Provider(season=season) if callable(Provider) else Provider
-        rows = None
-        for method in ('player_stats', 'get_player_stats'):
-            if hasattr(p, method):
-                rows = getattr(p, method)(tournament)
-                break
-        if rows is None:
-            rows = getattr(p, 'data', None)
-        if rows is None:
-            raise RuntimeError("FBref returned no data for the tournament.")
-
-        try:
-            import pandas as pd
-            if isinstance(rows, pd.DataFrame):
-                records = rows.to_dict(orient='records')
-            else:
-                records = list(rows)
-        except Exception:
-            records = list(rows)
-
-        out: List[Dict[str, Any]] = []
-        for r in records:
-            name = r.get('player') or r.get('name')
-            out.append({
-                'name': name,
-                'country': r.get('nation') or r.get('country') or r.get('nationality'),
-                'minutes': r.get('minutes') or r.get('min') or 0,
-                'matches': r.get('appearances') or r.get('apps') or 0,
-                'goals': r.get('goals') or 0,
-                'assists': r.get('assists') or 0,
-                'xG': r.get('xG') or r.get('xg') or 0.0,
-                'xA': r.get('xA') or r.get('xa') or 0.0,
-                'raw': r,
-            })
-        return out
+        fb = sd.FBref(leagues=tournament, seasons=season)
+        df = fb.read_player_season_stats(stat_type="standard")
+        df = _flatten(df)
     except Exception as e:
         raise RuntimeError(f"Error fetching tournament stats: {e}") from e
+
+    out: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        r = dict(row)
+        out.append({
+            'name':    _col(r, 'player_', 'player'),
+            'country': _col(r, 'nation_', 'nation', 'nationality', 'country'),
+            'minutes': _col(r, 'Playing Time_Min', 'Min', 'minutes') or 0,
+            'matches': _col(r, 'Playing Time_MP', 'MP', 'matches') or 0,
+            'goals':   _col(r, 'Performance_Gls', 'Gls', 'goals') or 0,
+            'assists': _col(r, 'Performance_Ast', 'Ast', 'assists') or 0,
+            'xG':      _col(r, 'Expected_xG', 'xG', 'xg') or 0.0,
+            'xA':      _col(r, 'Expected_xAG', 'xA', 'xa') or 0.0,
+            'raw': r,
+        })
+    return out
 
 
 def map_to_player(record: Dict[str, Any]) -> Player:
