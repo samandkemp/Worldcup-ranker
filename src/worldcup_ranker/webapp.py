@@ -373,7 +373,7 @@ if "squads" not in st.session_state:
             st.session_state.squad_sizes = _cache.get('squad_sizes', {})
             st.session_state.fetched_at  = _cache.get('fetched_at')
             st.session_state.fetch_params = {
-                'season':   _cache.get('season', '2425'),
+                'season':   _cache.get('season', '2526'),
                 'leagues':  _cache.get('leagues', _TOP_LEAGUES),
                 'wiki_url': _cache.get('wiki_url', WC2026_WIKI_URL),
             }
@@ -399,8 +399,8 @@ with st.sidebar:
     )
     season = st.text_input(
         "Season code",
-        value=_params.get('season', '2425'),
-        help="soccerdata season code — e.g. '2425' = 2024-25",
+        value=_params.get('season', '2526'),
+        help="soccerdata season code — e.g. '2526' = 2025-26",
     )
     selected_leagues = st.multiselect(
         "Leagues to scrape",

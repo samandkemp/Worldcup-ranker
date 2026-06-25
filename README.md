@@ -2,7 +2,7 @@
 
 A personal analysis tool for the 2026 World Cup. Scrapes club-season stats for every player at the tournament, maps them to their national squads, and presents an interactive dashboard for team and player comparisons.
 
-Stats are sourced from the 2024-25 club season across multiple leagues — goals, assists, xG, FIFA ratings — and normalised across all 48 squads for direct comparison. The idea is to replace pre-baked aggregate rankings with the same visualisation methods used in professional football analytics.
+Stats are sourced from the 2025-26 club season across multiple leagues — goals, assists, xG, FIFA ratings — and normalised across all 48 squads for direct comparison. The idea is to replace pre-baked aggregate rankings with the same visualisation methods used in professional football analytics.
 
 ### Setup
 
@@ -31,7 +31,7 @@ On startup, the app auto-loads from `data/squads_cache.json` if it exists from a
 
 **Sidebar settings:**
 
-- **Season code** — `2425` is the 2024-25 club season, the most recently completed domestic season for a June 2026 tournament.
+- **Season code** — `2526` is the 2025-26 club season, the most recently completed domestic season for a June 2026 tournament.
 - **Leagues** — seven selected by default (Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Primeira Liga, Eredivisie). Additional leagues improve coverage for players in the Turkish Super Lig, Brazilian Serie A, MLS, Saudi Pro League, etc.
 - **Min. club minutes** — filters the per-90 stats shown in charts to players above a minutes threshold; defaults to 500.
 - **Find a player** — substring search across all loaded squad data, shown inline above the tab bar.
@@ -66,7 +66,7 @@ Raw provider data is cached to `data/raw_sources.json`. The processed squad data
 
 **Group Stage shows "no data"** — Wikipedia uses headings like "Group A" for group tables; mid-tournament these often get renamed or restructured. The specific group-stage sub-article may have cleaner markup.
 
-**WC match data unavailable** — FBref may not yet have the competition listed, or the season identifier doesn't match. Expected before the tournament opens.
+**WC match data unavailable** — FBref competition identifier is `INT-World Cup` with season code `2526`. Data populates as the tournament progresses; early in the group stage some players may have no minutes logged yet.
 
 **Slow fetch** — FBref and similar sources rate-limit requests; `soccerdata` handles this transparently. Fewer leagues reduces fetch time.
 
@@ -74,7 +74,7 @@ Raw provider data is cached to `data/raw_sources.json`. The processed squad data
 
 ```
 src/worldcup_ranker/
-├── webapp.py            — Streamlit dashboard (5 tabs)
+├── webapp.py            — Streamlit dashboard (6 tabs)
 ├── pipeline.py          — fetch_for_leagues(), enrich_with_tournament_stats()
 ├── analytics.py         — per-90 calculations and Plotly chart functions
 ├── merge.py             — fuzzy deduplication across data providers
@@ -107,13 +107,13 @@ from worldcup_ranker.pipeline import fetch_for_leagues, enrich_with_tournament_s
 
 squads, squad_sizes, warnings = fetch_for_leagues(
     leagues=["ENG-Premier League", "ESP-La Liga", ...],
-    season="2425",
+    season="2526",
     tournament_wiki_url="https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_squads",
     storage_path="data/",
     force_refresh=False,
 )
 
-squads, warnings = enrich_with_tournament_stats(squads, tournament="FIFA World Cup", season="2026")
+squads, warnings = enrich_with_tournament_stats(squads, tournament="INT-World Cup", season="2526")
 ```
 
 `fetch_for_leagues` returns `(squads, squad_sizes, warnings)` where `squad_sizes` is `{country: total_wiki_squad_size}` for computing coverage percentages.
